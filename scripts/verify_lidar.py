@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-LiDAR 方向驗證工具
-用法：
-  1. 啟動 bringup_launch.py
-  2. 在車頭正前方 ~30cm 處放一個障礙物（手或箱子）
-  3. 執行此腳本：python3 verify_lidar.py
-  4. 看結果是否正確
+LiDAR orientation verification tool.
+
+Usage:
+  1. Launch bringup_launch.py
+  2. Place an obstacle (hand / box) ~30 cm in front of the car
+  3. Run: python3 verify_lidar.py
+  4. Check if the reported direction matches "Front"
 """
 import math
 import rclpy
@@ -28,17 +29,17 @@ class LidarVerifier(Node):
 
         n = len(msg.ranges)
         print(f'\n{"="*60}')
-        print(f'  LiDAR 方向驗證（共 {n} 點）')
-        print(f'  angle_min={math.degrees(msg.angle_min):.1f}°  '
-              f'angle_max={math.degrees(msg.angle_max):.1f}°')
+        print(f'  LiDAR orientation check ({n} points)')
+        print(f'  angle_min={math.degrees(msg.angle_min):.1f} deg  '
+              f'angle_max={math.degrees(msg.angle_max):.1f} deg')
         print(f'{"="*60}')
 
-        # Define direction sectors (±15° each)
+        # Direction sectors (+/- 15 deg each)
         sectors = {
-            '車頭 (Front)': 0.0,
-            '車左 (Left)':  90.0,
-            '車尾 (Rear)':  180.0,
-            '車右 (Right)': -90.0,
+            'Front': 0.0,
+            'Left':  90.0,
+            'Rear':  180.0,
+            'Right': -90.0,
         }
 
         half_width = 15.0  # degrees
@@ -59,11 +60,11 @@ class LidarVerifier(Node):
             if dists:
                 min_d = min(dists)
                 avg_d = sum(dists) / len(dists)
-                print(f'  {name:20s}  min={min_d:.3f}m  avg={avg_d:.3f}m  pts={len(dists)}')
+                print(f'  {name:10s}  min={min_d:.3f}m  avg={avg_d:.3f}m  pts={len(dists)}')
             else:
-                print(f'  {name:20s}  -- 無有效資料 --')
+                print(f'  {name:10s}  -- no valid data --')
 
-        # Find overall closest point
+        # Overall closest point
         min_r = float('inf')
         min_angle = 0.0
         for i in range(n):
@@ -75,16 +76,16 @@ class LidarVerifier(Node):
         if min_r < float('inf'):
             deg = math.degrees(min_angle)
             if -45 < deg < 45:
-                direction = '車頭 ✅' if min_r < 0.5 else '車頭'
+                direction = 'Front'
             elif 45 <= deg < 135:
-                direction = '車左'
+                direction = 'Left'
             elif deg >= 135 or deg <= -135:
-                direction = '車尾'
+                direction = 'Rear'
             else:
-                direction = '車右'
-            print(f'\n  ★ 最近障礙物: {min_r:.3f}m @ {deg:+.1f}° → {direction}')
-            print(f'    如果障礙物在車頭且顯示「車頭」→ LiDAR 方向正確 ✅')
-            print(f'    如果顯示其他方向 → LiDAR 需要校正 ❌')
+                direction = 'Right'
+            print(f'\n  * Closest obstacle: {min_r:.3f}m @ {deg:+.1f} deg -> {direction}')
+            print(f'    Obstacle is in front and shows "Front" -> LiDAR OK')
+            print(f'    Any other direction -> LiDAR needs calibration')
         print()
 
 
