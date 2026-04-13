@@ -1,0 +1,85 @@
+#!/bin/bash
+# slam_and_save.sh
+# SLAM 建圖 + 同步錄 waypoints，按 Enter 自動存檔
+#
+# Usage:
+#   ./slam_and_save.sh              → 輸出名稱自動用日期時間
+#   ./slam_and_save.sh my_track     → 輸出名稱用 my_track
+
+set -e
+
+NAME="${1:-track_$(date +%Y%m%d_%H%M)}"
+MAP_DIR="/mnt/nvme/f1tenth_ws/maps"
+WP_DIR="/mnt/nvme/f1tenth_ws/waypoints"
+WP_FILE="$WP_DIR/$NAME.csv"
+
+mkdir -p "$MAP_DIR" "$WP_DIR"
+
+source /opt/ros/humble/setup.bash
+source /mnt/nvme/f1tenth_ws/install/setup.bash
+
+echo ""
+echo "========================================"
+echo "  SLAM + Waypoint Recording"
+echo "  Map      → $MAP_DIR/$NAME.pgm"
+echo "  Waypoints→ $WP_FILE"
+echo "========================================"
+echo ""
+
+# ── 確認 bringup 已經在跑 ────────────────────────────────────────────
+if ! ros2 node list 2>/dev/null | grep -q sllidar_node; then
+    echo "[ERROR] bringup 還沒開！先執行 f1start，再跑這個腳本。"
+    exit 1
+fi
+echo "✔ bringup 已確認運行"
+
+# ── 啟動 SLAM ─────────────────────────────────────────────────────────
+ros2 launch f1tenth_stack slam_launch.py &
+SLAM_PID=$!
+echo "✔ SLAM 啟動中..."
+sleep 3
+
+# ── 啟動 Waypoint Logger（使用 map→base_link TF）─────────────────────
+ros2 run pure_pursuit waypoint_logger.py \
+    --ros-args \
+    -p output_file:="$WP_FILE" \
+    -p pose_source:=odom \
+    -p min_distance:=0.15 &
+WP_PID=$!
+echo "✔ Waypoint logger 啟動 → $WP_FILE"
+
+echo ""
+echo ">>> 現在用搖桿慢速繞場地一圈，回到起點後按 Enter 存檔 <<<"
+echo ""
+read -r
+
+# ── 存地圖 ────────────────────────────────────────────────────────────
+echo "Saving map..."
+ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap \
+    "{name: {data: $MAP_DIR/$NAME}}" 2>/dev/null || \
+ros2 run nav2_map_server map_saver_cli -f "$MAP_DIR/$NAME" \
+    --ros-args -p save_map_timeout:=5.0
+
+ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \
+    "{filename: $MAP_DIR/${NAME}_graph}" 2>/dev/null || true
+
+# ── 停止 waypoint logger（SIGINT 觸發儲存）────────────────────────────
+echo "Saving waypoints..."
+kill -INT $WP_PID 2>/dev/null
+wait $WP_PID 2>/dev/null || true
+
+# ── 停止 SLAM ─────────────────────────────────────────────────────────
+kill -INT $SLAM_PID 2>/dev/null
+wait $SLAM_PID 2>/dev/null || true
+
+echo ""
+echo "========================================"
+echo "  完成！"
+echo "  Map      : $MAP_DIR/$NAME.pgm"
+echo "  Map YAML : $MAP_DIR/$NAME.yaml"
+echo "  Waypoints: $WP_FILE"
+echo "========================================"
+echo ""
+echo "下一步：執行 MPC"
+echo "  ros2 run mpc_controller mpc_node \\"
+echo "    --ros-args -p waypoints_file:=$WP_FILE -p speed:=0.8"

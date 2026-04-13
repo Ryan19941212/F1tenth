@@ -1,0 +1,42 @@
+mpc_node:
+  ros__parameters:
+
+    # Topics
+    pose_source: "odom"
+    odom_topic: "/odom"
+    drive_topic: "/drive"
+    sim_speed_topic: "/autodrive/odom"
+    sim_ips_topic: "/autodrive/f1tenth_1/ips"
+    sim_imu_topic: "/autodrive/f1tenth_1/imu"
+
+    # Waypoints
+    waypoints_file: ""
+    use_waypoint_speed: false
+
+    # Vehicle
+    wheelbase: 0.3302
+
+    # Speed scheduling
+    speed: 0.5
+    speed_min: 0.0
+    speed_max: 1.5
+    max_lateral_accel: 1.0
+
+    # MPC timing and limits
+    dt: 0.1
+    horizon: 12
+    delta_max: 0.50
+    delta_rate_max: 0.12
+
+    # Costs
+    q_ey: 16.0
+    q_epsi: 10.0
+    r_delta: 0.05
+    r_d_delta: 0.8
+
+    # Path search / logging
+    search_window: 80
+    log_period: 0.5
+
+    # Safety behavior
+    safe_stop_on_solver_failure: true

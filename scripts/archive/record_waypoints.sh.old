@@ -1,0 +1,51 @@
+#!/bin/bash
+# Record waypoints: bringup + localization + waypoint logger
+# Drive one lap with joystick, then press ENTER to save and exit
+set -e
+
+source /opt/ros/humble/setup.bash
+source /mnt/nvme/f1tenth_ws/install/setup.bash
+
+MAP_FILE="/mnt/nvme/f1tenth_ws/maps/track_serialized"
+WAYPOINTS="/mnt/nvme/f1tenth_ws/maps/waypoints.csv"
+
+cleanup() {
+    echo "Cleaning up..."
+    kill $BRINGUP_PID $LOC_PID $WP_PID 2>/dev/null
+    wait 2>/dev/null
+    echo "Done."
+}
+trap cleanup EXIT
+
+echo "=== Starting bringup ==="
+ros2 launch f1tenth_stack bringup_launch.py &
+BRINGUP_PID=$!
+sleep 5
+
+echo "=== Starting localization ==="
+ros2 launch f1tenth_stack localization_launch.py map_file:=$MAP_FILE &
+LOC_PID=$!
+sleep 3
+
+echo "=== Starting waypoint logger ==="
+ros2 run pure_pursuit waypoint_logger.py --ros-args \
+    -p output_file:=$WAYPOINTS \
+    -p min_distance:=0.1 \
+    -p pose_source:=tf &
+WP_PID=$!
+sleep 1
+
+echo ""
+echo "============================================"
+echo "  Drive ONE lap with the joystick."
+echo "  When done, press ENTER to save and exit."
+echo "============================================"
+echo ""
+
+read -r
+
+# Send SIGINT to waypoint_logger so it saves
+kill -2 $WP_PID 2>/dev/null
+sleep 2
+
+echo "Waypoints saved to: $WAYPOINTS"

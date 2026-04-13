@@ -1,0 +1,63 @@
+#!/bin/bash
+# SLAM + waypoint recording — all in ONE launch to avoid DDS issues
+set -e
+
+source /opt/ros/humble/setup.bash
+source /mnt/nvme/f1tenth_ws/install/setup.bash
+
+WAYPOINTS="/mnt/nvme/f1tenth_ws/maps/waypoints.csv"
+
+cleanup() {
+    echo "Cleaning up..."
+    kill $LAUNCH_PID $WP_PID 2>/dev/null
+    wait 2>/dev/null
+    echo "Done."
+}
+trap cleanup EXIT
+
+echo "=== Starting bringup + SLAM (single launch) ==="
+ros2 launch f1tenth_stack bringup_launch.py \
+    slam:=true &
+LAUNCH_PID=$!
+sleep 8
+
+# Verify TF is working
+echo "=== Checking TF chain ==="
+if timeout 5 ros2 run tf2_ros tf2_echo map base_link 2>&1 | grep -q "Translation"; then
+    echo "TF OK!"
+else
+    echo "WARNING: map->base_link TF not available yet. Try moving the car a bit."
+fi
+
+echo "=== Starting waypoint logger ==="
+ros2 run pure_pursuit waypoint_logger.py --ros-args \
+    -p output_file:=$WAYPOINTS \
+    -p min_distance:=0.1 \
+    -p pose_source:=tf &
+WP_PID=$!
+sleep 1
+
+echo ""
+echo "============================================"
+echo "  Drive ONE lap with the joystick."
+echo "  When done, press ENTER to save everything."
+echo "============================================"
+echo ""
+
+read -r
+
+# Save waypoints (SIGINT triggers save in waypoint_logger)
+kill -2 $WP_PID 2>/dev/null
+sleep 2
+
+# Save map
+echo "Saving map..."
+ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap \
+    "{name: {data: /mnt/nvme/f1tenth_ws/maps/track}}" 2>&1 | tail -3
+ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \
+    "{filename: /mnt/nvme/f1tenth_ws/maps/track_serialized}" 2>&1 | tail -3
+
+echo ""
+echo "=== All saved ==="
+echo "  Map:       /mnt/nvme/f1tenth_ws/maps/track.pgm"
+echo "  Waypoints: $WAYPOINTS"

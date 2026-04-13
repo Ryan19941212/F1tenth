@@ -1,0 +1,119 @@
+#!/bin/bash
+# Record SLAM map + waypoints in one command.
+# Usage: ./record_track.sh [track_name]
+# Press Ctrl+C when done to save and exit.
+
+TRACK_NAME="${1:-my_track}"
+WS="/mnt/nvme/f1tenth_ws"
+MAP_DIR="$WS/maps"
+WAYPOINT_DIR="$WS/src/mpc_controller/waypoints"
+
+mkdir -p "$MAP_DIR" "$WAYPOINT_DIR"
+source "$WS/install/setup.bash"
+
+echo "=========================================="
+echo "  Track recorder: $TRACK_NAME"
+echo "=========================================="
+echo "  Map       -> $MAP_DIR/$TRACK_NAME.{yaml,pgm}"
+echo "  Waypoints -> $WAYPOINT_DIR/$TRACK_NAME.csv"
+echo ""
+echo "Starting SLAM..."
+
+setsid ros2 launch f1tenth_stack slam_launch.py \
+    </dev/null >/tmp/slam.log 2>&1 &
+SLAM_PID=$!
+
+sleep 3
+
+echo ""
+echo "=========================================="
+echo "  PHASE 1 — SLAM mapping"
+echo "=========================================="
+echo ">>> Drive as many laps as you want to build a good map."
+echo ">>> Loop closures and re-visiting areas will improve accuracy."
+echo ""
+echo ">>> When the map looks good, stop the car at your desired"
+echo ">>> waypoint START position, then press ENTER here to begin"
+echo ">>> recording ONE clean lap of waypoints."
+echo ""
+read -r -p "Press ENTER to start waypoint recording... " _
+
+echo ""
+echo "=========================================="
+echo "  PHASE 2 — Waypoint recording"
+echo "=========================================="
+
+setsid ros2 run pure_pursuit waypoint_logger.py --ros-args \
+    -p output_file:="$WAYPOINT_DIR/$TRACK_NAME.csv" \
+    -p pose_source:=tf \
+    </dev/null >/tmp/waypoint.log 2>&1 &
+WP_PID=$!
+
+echo ">>> Drive ONE clean lap."
+echo ">>> Press Ctrl+C when you return to the start position."
+echo ""
+
+cleanup() {
+    trap '' SIGINT
+    echo ""
+    echo "=========================================="
+    echo "  Saving..."
+    echo "=========================================="
+
+    echo "[1/3] Saving map via slam_toolbox service..."
+    if ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap \
+            "{name: {data: '$MAP_DIR/$TRACK_NAME'}}" \
+            >/tmp/mapsave.log 2>&1; then
+        echo "      OK -> $MAP_DIR/$TRACK_NAME.{yaml,pgm}"
+        # Also save the posegraph for later re-use (localization)
+        ros2 service call /slam_toolbox/serialize_map \
+            slam_toolbox/srv/SerializePoseGraph \
+            "{filename: '$MAP_DIR/$TRACK_NAME'}" \
+            >/tmp/mapserialize.log 2>&1 || true
+        # Convert PGM -> PNG for easy viewing
+        if [ -f "$MAP_DIR/$TRACK_NAME.pgm" ]; then
+            python3 -c "
+from PIL import Image
+img = Image.open('$MAP_DIR/$TRACK_NAME.pgm')
+img.save('$MAP_DIR/$TRACK_NAME.png')
+print('      PNG -> $MAP_DIR/$TRACK_NAME.png (' + str(img.size[0]) + 'x' + str(img.size[1]) + ')')
+" 2>/dev/null || echo "      (PNG conversion failed)"
+        fi
+    else
+        echo "      FAILED (see /tmp/mapsave.log)"
+    fi
+
+    echo "[2/3] Saving waypoints..."
+    # Signal the whole process group (ros2 run spawns children)
+    kill -INT -"$WP_PID" 2>/dev/null || true
+    for i in 1 2 3 4 5; do
+        if ! kill -0 "$WP_PID" 2>/dev/null; then break; fi
+        sleep 1
+    done
+    kill -9 -"$WP_PID" 2>/dev/null || true
+    wait "$WP_PID" 2>/dev/null || true
+    if [ -f "$WAYPOINT_DIR/$TRACK_NAME.csv" ]; then
+        N=$(($(wc -l < "$WAYPOINT_DIR/$TRACK_NAME.csv") - 1))
+        echo "      OK -> $N waypoints saved"
+    else
+        echo "      FAILED (see /tmp/waypoint.log)"
+    fi
+
+    echo "[3/3] Stopping SLAM..."
+    kill -INT -"$SLAM_PID" 2>/dev/null || true
+    for i in 1 2 3 4 5; do
+        if ! kill -0 "$SLAM_PID" 2>/dev/null; then break; fi
+        sleep 1
+    done
+    kill -9 -"$SLAM_PID" 2>/dev/null || true
+    wait "$SLAM_PID" 2>/dev/null || true
+    echo "      OK"
+
+    echo ""
+    echo "Done."
+    exit 0
+}
+
+trap cleanup SIGINT SIGTERM
+
+while true; do sleep 1; done

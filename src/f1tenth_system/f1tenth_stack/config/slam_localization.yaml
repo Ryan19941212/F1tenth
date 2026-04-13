@@ -1,0 +1,11 @@
+# Localization-specific overrides. Shared params live in slam_common.yaml;
+# localization_launch.py loads both (common first, this file second) and
+# then overlays `map_file_name` from the launch argument.
+slam_toolbox:
+  ros__parameters:
+    use_map_saver: false
+    mode: localization
+    map_start_pose: [0.0, 0.0, 0.0]
+
+    # Loop closure off in localization
+    do_loop_closing: false

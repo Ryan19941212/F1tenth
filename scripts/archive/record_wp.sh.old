@@ -1,0 +1,9 @@
+#!/bin/bash
+# Record waypoints — run this in a separate terminal while SLAM is running
+# Ctrl+C to save and exit
+source /opt/ros/humble/setup.bash
+source /mnt/nvme/f1tenth_ws/install/setup.bash
+ros2 run pure_pursuit waypoint_logger.py --ros-args \
+    -p output_file:=/mnt/nvme/f1tenth_ws/maps/waypoints.csv \
+    -p min_distance:=0.1 \
+    -p pose_source:=tf

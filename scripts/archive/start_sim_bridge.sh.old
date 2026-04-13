@@ -1,0 +1,23 @@
+#!/bin/bash
+# AutoDRIVE Simulator Bridge startup script
+# Usage: ./start_sim_bridge.sh
+
+# Auto-detect workspace root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -d "$SCRIPT_DIR/install" ]; then
+    WS="$SCRIPT_DIR"
+elif [ -d "$SCRIPT_DIR/../install" ]; then
+    WS="$(cd "$SCRIPT_DIR/.." && pwd)"
+else
+    echo "ERROR: Cannot find workspace install/ directory. Run colcon build first."
+    exit 1
+fi
+
+# Kill any existing bridge processes
+pkill -f "autodrive_incoming\|autodrive_outgoing\|ros2 launch autodrive" 2>/dev/null || true
+sleep 2
+
+# Launch bridge
+source /opt/ros/humble/setup.bash
+source "$WS/install/local_setup.bash"
+exec ros2 launch autodrive_f1tenth simulator_bringup_headless.launch.py

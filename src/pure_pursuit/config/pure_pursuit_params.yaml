@@ -1,0 +1,24 @@
+pure_pursuit_node:
+  ros__parameters:
+    waypoints_file: ""
+    pose_source: "pf"            # pf | odom
+    odom_topic: "/odom"
+    pf_pose_topic: "/pf/pose"
+    drive_topic: "/drive"
+    marker_topic: "/pure_pursuit/lookahead"
+
+    # Lookahead: L = clamp(k_ld * v, L_min, L_max)
+    lookahead_gain: 0.6
+    lookahead_min: 0.5
+    lookahead_max: 1.8
+
+    # Speed control
+    speed: 1.0                   # fallback if waypoint has no speed column
+    speed_min: 0.4
+    speed_max: 2.0
+    use_waypoint_speed: true
+    max_lateral_accel: 1.5       # v^2 * kappa cap (m/s^2)
+
+    # Vehicle
+    wheelbase: 0.3302
+    steering_max: 0.40

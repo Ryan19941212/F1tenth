@@ -1,0 +1,143 @@
+#!/bin/zsh
+# 兩階段 SLAM 建圖 + 錄 waypoints
+#
+# Usage: ./scripts/slam_record.sh [track_name]
+#
+# 階段 1: SLAM mapping → 存 serialized map + occupancy grid
+# 階段 2: SLAM localization → 精準定位 + 錄 waypoints
+#
+# 需要 bringup 先跑起來（f1start）
+
+set -e
+
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+NAME="${1:-track}_${TIMESTAMP}"
+WS="/mnt/nvme/f1tenth_ws"
+MAP_DIR="$WS/maps"
+MAP_FILE="$MAP_DIR/$NAME"
+WP_FILE="$MAP_DIR/${NAME}_waypoints.csv"
+
+mkdir -p "$MAP_DIR"
+source "$WS/install/setup.zsh"
+
+# 確認 bringup
+if ! ros2 node list 2>&1 | grep -q sllidar_node; then
+    echo "[ERROR] bringup 沒在跑，先執行 f1start"
+    exit 1
+fi
+echo "✔ bringup OK"
+
+# ============================================================
+#  階段 1: SLAM Mapping — 建圖
+# ============================================================
+echo ""
+echo "=========================================="
+echo "  階段 1: 建圖 (mapping)"
+echo "  用搖桿慢慢開一圈，回到起點後按 Ctrl+C"
+echo "=========================================="
+
+setsid ros2 launch f1tenth_stack slam_launch.py </dev/null >/tmp/slam_mapping.log 2>&1 &
+SLAM_PID=$!
+echo "✔ SLAM mapping started (PID=$SLAM_PID)"
+sleep 3
+
+# 等待使用者開完一圈
+PHASE1_DONE=false
+phase1_cleanup() {
+    trap '' SIGINT SIGTERM
+    PHASE1_DONE=true
+
+    echo ""
+    echo "── 存 serialized map ──"
+    # slam_toolbox serialize_map service
+    ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \
+        "{filename: '$MAP_FILE'}" 2>&1 | tail -3
+    sleep 1
+
+    if [ -f "${MAP_FILE}.posegraph" ]; then
+        echo "  ✔ Pose graph → ${MAP_FILE}.posegraph/.data"
+    else
+        echo "  ✘ Pose graph 存檔失敗"
+    fi
+
+    echo "── 存 occupancy grid ──"
+    ros2 run nav2_map_server map_saver_cli -f "$MAP_FILE" 2>&1 | tail -3
+    if [ -f "${MAP_FILE}.pgm" ]; then
+        echo "  ✔ Map → ${MAP_FILE}.pgm/.yaml"
+    else
+        echo "  ✘ 地圖存檔失敗"
+    fi
+
+    # 停 SLAM mapping
+    kill -INT -$SLAM_PID 2>/dev/null || kill -INT $SLAM_PID 2>/dev/null || true
+    sleep 2
+    echo "✔ SLAM mapping stopped"
+}
+trap phase1_cleanup SIGINT SIGTERM
+
+while [ "$PHASE1_DONE" = false ]; do sleep 1; done
+
+# ============================================================
+#  階段 2: SLAM Localization — 定位 + 錄 waypoints
+# ============================================================
+echo ""
+echo "=========================================="
+echo "  階段 2: 定位 + 錄 waypoints (localization)"
+echo "  把車放回起點位置"
+echo "  用搖桿慢慢開一圈，回到起點後按 Ctrl+C"
+echo "=========================================="
+echo ""
+echo "  Map file: ${MAP_FILE}"
+echo "  WP  file: ${WP_FILE}"
+echo ""
+
+# 等 2 秒讓使用者把車放好
+sleep 2
+
+setsid ros2 launch f1tenth_stack localization_launch.py \
+    map_file:="$MAP_FILE" </dev/null >/tmp/slam_localization.log 2>&1 &
+LOC_PID=$!
+echo "✔ SLAM localization started (PID=$LOC_PID)"
+sleep 3
+
+setsid python3 "$WS/src/mpc_controller/scripts/record_waypoints.py" \
+    -o "$WP_FILE" --dist 0.05 </dev/null &
+WP_PID=$!
+echo "✔ Waypoint recorder started (PID=$WP_PID)"
+
+echo ""
+echo "=========================================="
+echo "  用搖桿慢慢開一圈，回到起點後按 Ctrl+C"
+echo "=========================================="
+
+phase2_cleanup() {
+    trap '' SIGINT SIGTERM
+    echo ""
+    echo "── 停止錄製 ──"
+
+    # 停 waypoint recorder
+    kill -INT -$WP_PID 2>/dev/null || kill -INT $WP_PID 2>/dev/null || true
+    sleep 2
+    if [ -f "$WP_FILE" ]; then
+        N=$(wc -l < "$WP_FILE")
+        echo "  ✔ $N waypoints → $WP_FILE"
+    else
+        echo "  ✘ waypoints 存檔失敗"
+    fi
+
+    # 停 localization
+    kill -INT -$LOC_PID 2>/dev/null || kill -INT $LOC_PID 2>/dev/null || true
+    sleep 2
+
+    echo ""
+    echo "=========================================="
+    echo "  Done! Files:"
+    echo "    Map:       ${MAP_FILE}.pgm/.yaml"
+    echo "    PoseGraph: ${MAP_FILE}.posegraph/.data"
+    echo "    Waypoints: ${WP_FILE}"
+    echo "=========================================="
+    exit 0
+}
+trap phase2_cleanup SIGINT SIGTERM
+
+while true; do sleep 1; done

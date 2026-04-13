@@ -1,0 +1,38 @@
+# ROS2 build artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Compiled
+*.so
+*.o
+*.a
+
+# Editor / tooling
+.vscode/
+.idea/
+.claude/
+.codex
+
+# Archived labs / sims (not part of the active pipeline)
+src/archive/
+
+# TUM outputs (regenerate with scripts/optimize_raceline.sh)
+tools/global_racetrajectory_optimization/outputs/
+
+# range_libc build byproducts
+tools/range_libc/pywrapper/build/
+tools/range_libc/pywrapper/RangeLibc.cpp
+tools/range_libc/pywrapper/*.so
+
+# Local runtime
+*.bag
+*.db3
+rosbag*/
